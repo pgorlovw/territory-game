@@ -2,7 +2,7 @@
 // 1. БАЗОВЫЕ НАСТРОЙКИ
 // ============================================================
 
-const API_BASE = 'http:// https://all-dingos-sneeze.loca.lt/api';  // ← при публикации замени на https://твой-сервер.onrender.com/api
+const API_BASE = 'http://ready-worlds-shake.loca.lt/api';  // ← при публикации замени на https://твой-сервер.onrender.com/api
 
 let currentUser = null;
 let currentGameMode = null;
