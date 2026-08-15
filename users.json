@@ -1,0 +1,15 @@
+[
+  {
+    "username": "Owner",
+    "password": "k132132132",
+    "totalDistance": 0,
+    "territories": [],
+    "colorLine": "#e94560",
+    "colorTerritory": "#00ff88",
+    "wins": 0,
+    "losses": 0,
+    "isOnline": false,
+    "searching": null,
+    "activeDuel": null
+  }
+]
