@@ -2,8 +2,7 @@
 // 1. БАЗОВЫЕ НАСТРОЙКИ
 // ============================================================
 
-const API_BASE = 'https://ten-carpets-hunt.loca.lt/api';  // ← при публикации замени на https://твой-сервер.onrender.com/api
-
+const API_BASE = 'https://whole-frogs-hunt.loca.lt/api'; // ← замени на свой адрес, если нужно
 let currentUser = null;
 let currentGameMode = null;
 let duelData = null;
@@ -58,7 +57,7 @@ async function login() {
     try {
         const data = await apiRequest('/login', 'POST', { username, password });
         currentUser = data.user;
-        await setOnlineStatus(true);
+        localStorage.setItem('session', JSON.stringify(currentUser));
         alert(`Добро пожаловать, ${username}!`);
         showMainMenu();
     } catch (error) {
@@ -67,27 +66,17 @@ async function login() {
 }
 
 async function logout() {
-    if (currentUser) {
-        await setOnlineStatus(false);
-    }
+    if (!currentUser) return;
+    try {
+        await apiRequest('/logout', 'POST', { username: currentUser.username });
+    } catch (e) { console.warn('Ошибка при выходе', e); }
+    localStorage.removeItem('session');
     currentUser = null;
     showLoginForm();
 }
 
 // ============================================================
-// 4. ОНЛАЙН-СТАТУС
-// ============================================================
-
-async function setOnlineStatus(isOnline) {
-    // await setOnlineStatus(true);
-    if (!currentUser) return;
-    try {
-        await apiRequest('/logout', 'POST', { username: currentUser.username, isOnline });
-    } catch (e) { console.warn('Не удалось обновить статус', e); }
-}
-
-// ============================================================
-// 5. ОБНОВЛЕНИЕ ДАННЫХ ПОЛЬЗОВАТЕЛЯ
+// 4. ОБНОВЛЕНИЕ ДАННЫХ ПОЛЬЗОВАТЕЛЯ
 // ============================================================
 
 async function saveUserData() {
@@ -116,11 +105,10 @@ async function saveColors() {
 }
 
 // ============================================================
-// 6. ОТОБРАЖЕНИЕ ЭКРАНОВ
+// 5. ОТОБРАЖЕНИЕ ЭКРАНОВ
 // ============================================================
 
 function showLoginForm() {
-    console.trace('showLoginForm вызвана');
     document.getElementById('app').innerHTML = `
         <div class="auth-container">
             <h2>🔐 Вход</h2>
@@ -148,7 +136,6 @@ function showMainMenu() {
     const user = currentUser;
     document.getElementById('app').innerHTML = `
         <div class="menu-container" style="position:relative;">
-            <button class="credits-btn" onclick="showCredits()">📜 Credits</button>
             <h2>🏠 Главное меню</h2>
             <p>Привет, <strong>${user.username}</strong>!</p>
             <div style="margin: 15px 0;">
@@ -161,13 +148,13 @@ function showMainMenu() {
             <button class="menu-btn" onclick="startFreeGame()">🎮 Играть</button>
             <button class="menu-btn" onclick="showDuelMenu()">⚔️ Дуэль</button>
             <button class="menu-btn" onclick="showLeaderboard()">🏆 Лидерборд</button>
-            <button class="menu-btn" onclick="alert('sorry for this bug but i will fix it soon and for now you cant leave your account')"" style="background:#555;">🚪 Выйти</button>
+            <button class="menu-btn" onclick="logout()" style="background:#555;">🚪 Выйти</button>
         </div>
     `;
 }
 
 // ============================================================
-// 7. ЛИДЕРБОРД
+// 6. ЛИДЕРБОРД
 // ============================================================
 
 async function showLeaderboard() {
@@ -198,7 +185,7 @@ async function showLeaderboard() {
 }
 
 // ============================================================
-// 8. ДУЭЛИ (поиск соперника, меню)
+// 7. ДУЭЛИ (поиск соперника, меню)
 // ============================================================
 
 function showDuelMenu() {
@@ -230,6 +217,7 @@ function showDuelMenu() {
     if (duelSearchInterval) clearInterval(duelSearchInterval);
     duelSearchInterval = setInterval(updateOnlineList, 3000);
     updateOnlineList();
+    checkDuelStatus();
 }
 
 async function updateOnlineList() {
@@ -249,7 +237,6 @@ async function updateOnlineList() {
 async function startDuelSearch() {
     if (isSearching) return;
     const time = parseInt(document.getElementById('duel-time-select').value);
-    // Обновляем статус поиска на сервере
     try {
         await apiRequest('/update_user', 'POST', {
             username: currentUser.username,
@@ -260,50 +247,34 @@ async function startDuelSearch() {
         document.getElementById('cancel-search-btn').style.display = 'inline-block';
         document.getElementById('search-status').textContent = 'Поиск соперника...';
         if (duelSearchInterval) clearInterval(duelSearchInterval);
-        duelSearchInterval = setInterval(checkDuelMatch, 3000);
-        checkDuelMatch();
+        duelSearchInterval = setInterval(checkDuelStatus, 2000);
+        checkDuelStatus();
     } catch (e) {
         alert('Не удалось начать поиск');
     }
 }
 
-async function checkDuelMatch() {
+async function checkDuelStatus() {
     try {
         const users = await apiRequest('/users');
-        const opponent = users.find(u => 
-            u.username !== currentUser.username && 
-            u.isOnline && 
-            u.searching === currentUser.searching
-        );
-        if (opponent) {
-            // Нашли соперника, начинаем дуэль
+        const me = users.find(u => u.username === currentUser.username);
+        if (me && me.activeDuel) {
             clearInterval(duelSearchInterval);
             isSearching = false;
-            // Сбрасываем поиск у обоих на сервере
-            await apiRequest('/update_user', 'POST', { username: currentUser.username, searching: null });
-            await apiRequest('/update_user', 'POST', { username: opponent.username, searching: null });
-            currentUser.searching = null;
-            // Создаём дуэль (данные сохраняются в activeDuel у обоих)
-            const duelId = Date.now() + '_' + currentUser.username;
-            const duelDataObj = {
-                id: duelId,
-                player1: currentUser.username,
-                player2: opponent.username,
-                time: currentUser.searching * 60, // секунды
+            document.getElementById('cancel-search-btn').style.display = 'none';
+            document.getElementById('search-status').textContent = 'Дуэль найдена!';
+            const duel = me.activeDuel;
+            const opponent = (duel.player1 === currentUser.username) ? duel.player2 : duel.player1;
+            duelData = {
+                opponent: opponent,
+                time: duel.time,
                 startTime: Date.now(),
-                territories1: 0,
-                territories2: 0,
-                finished: false,
-                winner: null
+                myScore: 0,
+                opponentScore: 0
             };
-            // Сохраняем дуэль в обоих пользователях
-            await apiRequest('/update_user', 'POST', { username: currentUser.username, activeDuel: duelDataObj });
-            await apiRequest('/update_user', 'POST', { username: opponent.username, activeDuel: duelDataObj });
-            // Переходим в игру
             currentGameMode = 'duel';
-            duelData = { opponent: opponent.username, time: duelDataObj.time, startTime: Date.now(), myScore: 0, opponentScore: 0 };
             startGame('duel');
-            alert(`Дуэль с ${opponent.username} начинается!`);
+            alert(`Дуэль с ${opponent} начинается!`);
         }
     } catch (e) {}
 }
@@ -319,7 +290,7 @@ function cancelDuelSearch() {
 }
 
 // ============================================================
-// 9. ИГРОВОЙ ПРОЦЕСС
+// 8. ИГРОВОЙ ПРОЦЕСС (свободный и дуэль)
 // ============================================================
 
 function startFreeGame() {
@@ -357,7 +328,6 @@ function startGame(mode) {
 
     myPolyline = L.polyline([], { color: currentUser.colorLine || '#e94560', weight: 4 }).addTo(map);
 
-    // Отображаем сохранённые территории
     territoryPolygons = [];
     if (currentUser.territories) {
         currentUser.territories.forEach(polygon => {
@@ -376,7 +346,7 @@ function startGame(mode) {
 }
 
 // ============================================================
-// 10. ТАЙМЕР ДУЭЛИ
+// 9. ТАЙМЕР ДУЭЛИ
 // ============================================================
 
 function startDuelTimer() {
@@ -421,22 +391,20 @@ async function endDuel() {
     else if (oppScore > myScore) winner = duelData.opponent;
     else winner = 'Ничья';
     alert(`Результат: Вы захватили ${myScore} территорий, соперник ${oppScore}. Победитель: ${winner}`);
-    // Обновляем статистику
     let wins = currentUser.wins || 0;
     let losses = currentUser.losses || 0;
     if (winner === currentUser.username) wins++;
     else if (winner !== 'Ничья') losses++;
     await apiRequest('/update_user', 'POST', {
         username: currentUser.username,
-        wins, losses,
+        wins: wins,
+        losses: losses,
         activeDuel: null
     });
-    // У соперника тоже сбрасываем activeDuel
     await apiRequest('/update_user', 'POST', {
         username: duelData.opponent,
         activeDuel: null
     });
-    // Обновляем текущего пользователя
     currentUser.wins = wins;
     currentUser.losses = losses;
     currentUser.activeDuel = null;
@@ -444,7 +412,7 @@ async function endDuel() {
 }
 
 // ============================================================
-// 11. ОТСЛЕЖИВАНИЕ И ЗАХВАТ ТЕРРИТОРИИ
+// 10. ОТСЛЕЖИВАНИЕ И ЗАХВАТ ТЕРРИТОРИИ
 // ============================================================
 
 function startTracking() {
@@ -471,7 +439,6 @@ function stopTracking() {
     isTracking = false;
     document.getElementById('start-btn').disabled = false;
     document.getElementById('stop-btn').disabled = true;
-    // Захват территории по буферу уже происходит в реальном времени, поэтому просто сохраняем дистанцию
     currentUser.totalDistance += totalDistance;
     saveUserData();
     document.getElementById('total-km').textContent = (currentUser.totalDistance/1000).toFixed(2);
@@ -490,7 +457,6 @@ function onLocationSuccess(position) {
     myRoute.push(newPoint);
     myPolyline.setLatLngs(myRoute);
     map.panTo(newPoint);
-    // Обновляем буфер территории
     updateTerritoryBuffer();
 }
 
@@ -518,7 +484,7 @@ function updateDistance(meters) {
 }
 
 // ============================================================
-// 12. ЗАХВАТ ТЕРРИТОРИИ С РАДИУСОМ (5 МЕТРОВ)
+// 11. ЗАХВАТ ТЕРРИТОРИИ С РАДИУСОМ (5 МЕТРОВ)
 // ============================================================
 
 function updateTerritoryBuffer() {
@@ -531,12 +497,10 @@ function updateTerritoryBuffer() {
     } else {
         territoryBuffer = buffered;
     }
-    // Пытаемся захватить
     captureTerritoryWithBuffer(territoryBuffer);
 }
 
 async function captureTerritoryWithBuffer(bufferPolygon) {
-    // Проверяем, есть ли уже такая территория у пользователя
     let existingTerritories = currentUser.territories || [];
     let hasIntersection = false;
     for (let territory of existingTerritories) {
@@ -576,7 +540,7 @@ function displayTerritories() {
 }
 
 // ============================================================
-// 13. ВЫХОД ИЗ ИГРЫ
+// 12. ВЫХОД ИЗ ИГРЫ
 // ============================================================
 
 function exitGame() {
@@ -595,32 +559,25 @@ function finishGame() {
 }
 
 // ============================================================
-// 14. CREDITS (модальное окно)
-// ============================================================
-
-function showCredits() {
-    document.getElementById('credits-modal').style.display = 'flex';
-}
-
-function closeCredits() {
-    document.getElementById('credits-modal').style.display = 'none';
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    const modal = document.getElementById('credits-modal');
-    if (modal) {
-        modal.addEventListener('click', function(e) {
-            if (e.target === modal) closeCredits();
-        });
-    }
-});
-
-// ============================================================
-// 15. ЗАПУСК
+// 13. ЗАПУСК (восстановление сессии)
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', async function() {
-    // Проверяем, есть ли сохранённая сессия (пока не реализовано)
-    // Просто показываем форму входа
+    const saved = localStorage.getItem('session');
+    if (saved) {
+        try {
+            const user = JSON.parse(saved);
+            const users = await apiRequest('/users');
+            const found = users.find(u => u.username === user.username);
+            if (found) {
+                currentUser = found;
+                showMainMenu();
+                return;
+            }
+        } catch (e) {
+            console.warn('Сессия недействительна', e);
+        }
+        localStorage.removeItem('session');
+    }
     showLoginForm();
 });
